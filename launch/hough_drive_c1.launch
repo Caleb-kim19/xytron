@@ -15,7 +15,7 @@
   </node>
 
   <!-- auto drive -->
-  <node name="oval_team1" pkg="oval_team1" type="pyeongang.py" output="screen"/>
+  <node name="oval_team1" pkg="oval_team1" type="example.py" output="screen"/>
 
   <!-- motor node -->
   <node name="xycar_motor" pkg="xycar_motor" type="xycar_motor_c1.py" output="screen" >
