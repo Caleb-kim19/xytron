@@ -26,3 +26,8 @@ $ rosrun image_view image_view image:=/usb_cam/image_raw _image_transport:=compr
 $ rosbag play 저장된백업파일.bag
 
 
+구동할 파이썬 코드 선택하는 법
+launch 파일에서 아래 내용 수정하기
+<!-- auto drive -->
+  <node name="oval_team1" pkg="oval_team1" type="바꾸고 싶은 파이썬파일이름.py" output="screen"/>
+
