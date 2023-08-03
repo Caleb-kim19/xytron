@@ -70,11 +70,18 @@ def drive(Angle, Speed):
     motor.publish(motor_msg)
 
 # draw lines
-def draw_lines(img, lines):
+def draw_lines_l(img, lines):
     global Offset
     for line in lines:
         x1, y1, x2, y2 = line[0]
         img = cv2.line(img, (x1, y1+Offset), (x2, y2+Offset), (0, 255, 0), 2)
+    return img
+
+def draw_lines_r(img, lines):
+    global Offset
+    for line in lines:
+        x1, y1, x2, y2 = line[0]
+        img = cv2.line(img, (x1, y1+Offset), (x2, y2+Offset), (0, 0, 255), 2)
     return img
 
 # draw rectangle
@@ -290,8 +297,8 @@ def process_image(frame):
 
     if cam_debug:
         # draw lines
-        frame = draw_lines(frame, left_lines)
-        frame = draw_lines(frame, right_lines)
+        frame = draw_lines_l(frame, left_lines)
+        frame = draw_lines_r(frame, right_lines)
         frame = cv2.line(frame, (115, 117), (205, 117), (0,255,255), 2)
         #frame = cv2.rectangle(frame, (60, Offset), (Width-30, Offset+Gap), (0, 255, 0), 2)
        

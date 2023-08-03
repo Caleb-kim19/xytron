@@ -70,18 +70,11 @@ def drive(Angle, Speed):
     motor.publish(motor_msg)
 
 # draw lines
-def draw_lines_l(img, lines):
+def draw_lines(img, lines):
     global Offset
     for line in lines:
         x1, y1, x2, y2 = line[0]
         img = cv2.line(img, (x1, y1+Offset), (x2, y2+Offset), (0, 255, 0), 2)
-    return img
-
-def draw_lines_r(img, lines):
-    global Offset
-    for line in lines:
-        x1, y1, x2, y2 = line[0]
-        img = cv2.line(img, (x1, y1+Offset), (x2, y2+Offset), (0, 0, 255), 2)
     return img
 
 # draw rectangle
@@ -297,8 +290,8 @@ def process_image(frame):
 
     if cam_debug:
         # draw lines
-        frame = draw_lines_l(frame, left_lines)
-        frame = draw_lines_r(frame, right_lines)
+        frame = draw_lines(frame, left_lines)
+        frame = draw_lines(frame, right_lines)
         frame = cv2.line(frame, (115, 117), (205, 117), (0,255,255), 2)
         #frame = cv2.rectangle(frame, (60, Offset), (Width-30, Offset+Gap), (0, 255, 0), 2)
        
@@ -367,10 +360,10 @@ def start():
     print ("---------- Xycar C1 HD v1.0 ----------")
     time.sleep(1)#3
 
-    sq = rospy.Rate(30)
-    #rospy.Rate(100)
+    
+    rospy.Rate(30) #hz (30hz 1초에 30번 연산)
     t_check = time.time()
-    f_n = 0
+    f_n = 0 
     p_angle = 0
     flag = 0
     line_count = 0
@@ -400,6 +393,7 @@ def start():
             f_n = 0
         
         draw_img = image.copy()
+        
         try:
             lpos, rpos, len_all_lines, go = process_image(draw_img)
         except:
@@ -409,7 +403,7 @@ def start():
             line_count, flag = stop(len_all_lines, flag, line_count)
          #stop
         if (line_count==2):# 라인 카운트 2개시 정지 
-            drive(0,-5)
+            drive(0,-16)
             cv2.waitKey(0)
             line_count = 0
 
@@ -418,7 +412,60 @@ def start():
         error = (center - Width/2)
         angle, ITerm = pid_angle(ITerm, error, b_angle, b_error, Cnt)
         
-        drive(angle, 18)
+        if lpos == 0 and rpos == 320:
+            angle = 70
+            drive(angle, 21)
+        else:
+##################  avoid car
+                        
+            if time.time() > avoid_time and Cnt == 0:
+                Cnt = 1
+                print("------------------------CNT: ",Cnt)
+                print("------------------------CNT: ",Cnt)
+                
+            if (ultra_msg[2] < 75 or ultra_msg[3] < 60) and Cnt == 1:
+                Cnt = 2
+#                 avoid_drive_left()
+                max_time_end = time.time() + 0.30
+                while True:
+                    drive(-70,3)
+                    if time.time() > max_time_end:
+                        break
+
+                max_time_end = time.time() + 0.68 #start(True)
+                while True:
+                    drive(-70,21)
+                    if time.time() > max_time_end:
+                        break
+                
+                max_time_end = time.time() + 0.5  # changed line and to be stable
+                while True:
+                    drive(50,19)
+                    if time.time() > max_time_end:
+                        break
+                turn_right = time.time() + 1.3
+
+            if ultra_msg[3] >100 and Cnt == 2 and time.time() > turn_right :
+                max_time_end = time.time() + 0.6    #go back to the line
+                while True:
+                    drive(45,18)
+                    if time.time() > max_time_end:
+                        break
+                    
+                max_time_end = time.time() + 0.5    #go back to the line
+                while True:
+                    drive(-50,19)
+                    if time.time() > max_time_end:
+                        break   
+                
+                Cnt = 3
+                continue
+################## 
+            if Cnt == 3:
+                ang = angle * 0.8
+                drive(angle,22)
+            else:
+                drive(angle, 21)
         
         steer_angle = angle * 0.4
         draw_steer(steer_angle)
