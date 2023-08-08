@@ -6,8 +6,15 @@ ssh 비밀번호는 xytron
 
 자율주행 실행하는 법
 현재 파일 위치를 /xycar_ws/src/ 로 이동 후 다음 명령어 실행
-$ roslaunch <폴더이름> <런치파일이름> 즉
+$ roslaunch <폴더이름> <런치파일이름> 
+
+예시:
+$ cd ~/xycar_ws/src
 $ roslaunch oval_team1 hough_drive_c1.launch
+
+21년도 코드 돌릴려면 
+$ roslaunch mydrive hough_drive_c1.launch
+
 
 파일 정리할 땐 
 $ cm
