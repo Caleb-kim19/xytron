@@ -20,7 +20,7 @@ import os
 
 image = np.empty(shape=[0])
 bridge = CvBridge()
-stopline_count = -1
+stopline_count = 0
 Width = 320
 Height = 240
 #stop_cascade = cv2.CascadeClassifier('/home/pi/xycar_ws/src/auto_drive/src/stop_cascade.xml')
@@ -99,26 +99,20 @@ def detect_stopline(x):
 
             recte = rect_w*rect_h
 
-            if recte >= 1600.0:
-                #print('STOPLINE Detected ' + str(recte) + ' ' + str(stopline_count))
-                    
-                if stopline_count == -1 :
+            if recte >= 8000.0:
+                if stopline_count == 0 :
                     stopline_count = stopline_count + 1
                     prev_time = time.time()
+                    print('STOPLINE Detected ' + str(recte) + 'LAP: ' + str(stopline_count))
                 
-                elif stopline_count == 0 and (time.time()-prev_time)> 8:
+                elif stopline_count == 1 and (time.time()-prev_time)> 8:
                     stopline_count = stopline_count + 1
                     prev_time = time.time()
-               
-                elif stopline_count == 1 and (time.time()-prev_time) > 8:
+                    print('STOPLINE Detected ' + str(recte) + 'LAP: ' + str(stopline_count))
                     size_r = rect_size()
                     size_r.size = recte
                     size.publish(size_r)
-                    
-                '''
-                
-                '''
-            #print(stopline_count)
+
 
 def start():
     global motor

@@ -88,9 +88,8 @@ def img_callback(data):
 def detect_stopline(x):
     global stop, drive_mode
     stop = x
-    if x > 1600.0 :
-        print('auto_dirve_STOPLINE Detected size : ' + str(stop))
-        drive_mode = 2
+    print('auto_drive STOPPING :' + str(stop.size))
+    drive_mode = 2
         
 def detect_obstacle(data):
     global obstacle, drive_mode, back_time
@@ -317,8 +316,8 @@ def process_image(frame):
     
     '''
     # blur
-    kernel_size = 3
-    standard_deviation_x = 1.5     #Kernel standard deviation along X-axis
+    kernel_size = 5
+    standard_deviation_x = 3     #Kernel standard deviation along X-axis
     blur = cv2.GaussianBlur(frame, (kernel_size, kernel_size), standard_deviation_x)
     
     vertices5 = np.array([[(0,175), (0,240), (320,240), (320,175), (300,175), (210,145), (110,145), (20,175)]], dtype=np.int32)
@@ -326,20 +325,20 @@ def process_image(frame):
     
     roi = region_of_interest(blur, vertices5)
     roi = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
-    #cv2.imshow('roi', roi)
+    cv2.imshow('roi', roi)
     
     # gray
     gray = cv2.cvtColor(roi,cv2.COLOR_BGR2GRAY)
     
-    ret, dest = cv2.threshold(gray, 65, 255, cv2.THRESH_BINARY)
-
+    ret, dest = cv2.threshold(gray, 130, 255, cv2.THRESH_BINARY )
+    cv2.imshow('gray', dest)
 
     # canny edge
-    low_threshold = 90
+    low_threshold = 170
     high_threshold = 200
     edge_img = cv2.Canny(np.uint8(dest), low_threshold, high_threshold, kernel_size)
     
-    #cv2.imshow('Canny', edge_img)
+    cv2.imshow('Canny', edge_img)
     
     # HoughLinesP
     all_lines = cv2.HoughLinesP(edge_img, 1, math.pi/180,30,30,5)
@@ -426,7 +425,7 @@ def start():
     global Width, Height
     global m
 
-    angle_pid_P = 0.7
+    angle_pid_P = 1
     angle_pid_I = 0.0
     angle_pid_D = 0.7
     
@@ -456,22 +455,15 @@ def start():
 
     while not rospy.is_shutdown():
         
-
         while not image.size == (Width*Height*3):
             continue
-
-        f_n += 1
-        if (time.time() - t_check) >= 1:
-            print("fps : ", f_n)
-            t_check = time.time()
-            f_n = 0
 
         draw_img = image.copy()
         img = draw_img
         
         obstacle_img = image.copy()        
         obstacle_img = cv2.rectangle(obstacle_img,(obstacle[0],obstacle[1]),(obstacle[0]+obstacle[2],obstacle[1]+obstacle[3]),(255,0,0),2)
-        cv2.imshow('obs',obstacle_img)
+        #cv2.imshow('obstacle',obstacle_img)
         #out1.write(draw_img)
         
         #cv2.imwrite('/home/pi/xycar_ws/src/auto_drive/src/images/xycar'+str(numbering).zfill(3)+'.jpg',draw_img)
@@ -482,15 +474,16 @@ def start():
         if go:
             center = (lpos + rpos) / 2
             angle = -(Width/2 - center)
-            steer_angle = angle * 0.95
+            steer_angle = angle
+            prev_angle = steer_angle
         
         else :
             steer_angle = prev_angle
 
+        #PID 제어 부분
         sum_angle += steer_angle
         diff_angle = steer_angle - prev_angle
         angle_c = angle_pid_P * steer_angle + angle_pid_I * sum_angle + angle_pid_D * (diff_angle)
-        prev_angle = steer_angle
         
         
         if angle_c > 38 :
