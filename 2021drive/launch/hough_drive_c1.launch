@@ -14,9 +14,6 @@
     <param name="camera_info_url" value="file://$(find usb_cam)/calibration/usb_cam_40.yaml" />
   </node>
 
-  <!-- stopline_detect -->
-  <node name="stopline_detect" pkg="mydrive" type="stopline.py" output="screen"/>
-
   <!-- auto drive -->
   <node name="auto_drive" pkg="mydrive" type="hough_drive_c1.py" output="screen"/>
 
@@ -24,7 +21,5 @@
   <node name="xycar_motor" pkg="xycar_motor" type="xycar_motor_c1.py" output="screen" >
     <param name="angle_offset" value="0" />
   </node>
-
-  
 
 </launch>

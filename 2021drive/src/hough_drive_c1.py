@@ -37,9 +37,8 @@ Width = 320
 Height = 240
 Offset = 175
 Gap = 85
-recte = 0
-stop = 0
 m = 0
+prev_time = 0
 #size = 0
 
 '''
@@ -48,19 +47,12 @@ mode 1 = obstacle detected
 mode 2 = stopline_detected
 '''
 drive_mode = 0
-
-
-
 back_time = 0
-
 cam = True
 cam_debug = True
-
-
 sub_f = 0
 time_c = 0
 stopline_count = 0
-
 obstacle = (0,0,0,0)
 '''
 yellow_line(center_line) position
@@ -72,37 +64,27 @@ yellow_line = 0
 
 #out1 = cv2.VideoWriter('../result.avi', fourcc, 15.0, (Width, Height))
 
+cascade = cv2.CascadeClassifier('/home/pi/xycar_ws/src/oval_team1/2021drive/src/obs_cascade.xml')
+
 def img_callback(data):
     global image   
     global sub_f 
     global time_c
-    '''
-    sub_f += 1
-    if time.time() - time_c > 1:
-        print("pub fps :", sub_f)
-        time_c = time.time()
-        sub_f = 0
-    '''
     image = bridge.imgmsg_to_cv2(data, "bgr8")
-    
-def detect_stopline(x):
-    global stop, drive_mode
-    stop = x
-    print('auto_drive STOPPING :' + str(stop.size))
-    drive_mode = 2
         
-def detect_obstacle(data):
+def detect_obstacle(image):
     global obstacle, drive_mode, back_time
     
-    if data.data != (0,0,0,0):
-        obstacle = data.data
-        #print(data.data)
+    gray = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
+    cascades = cascade.detectMultiScale(gray,1.01,50)
+
+    if len(cascades) > 0:
+        obstacle = cascades[0]
+        print('obstacle detected')
         drive_mode = 1
-        
     else:
         obstacle = (0,0,0,0)
 
-        
 # publish xycar_motor msg
 def drive(Angle, Speed): 
     global motor
@@ -131,7 +113,7 @@ def yellow_line_detect(image):
     yellow_mask = cv2.inRange(hls, yellow_lower, yellow_upper)
     masked = cv2.bitwise_and(image, image, mask = yellow_mask)
     
-    cv2.imshow('yellow',masked)
+    #cv2.imshow('yellow',masked)
     
     gray = cv2.cvtColor(masked,cv2.COLOR_BGR2GRAY)
     # blur
@@ -294,29 +276,32 @@ def region_of_interest(img, vertices, color3=(255, 255, 255), color1=255):
 
     return ROI_image
 
+def detect_stopline(line_count):
+    global stopline_count, drive_mode, prev_time
+    # 정지선 인식
+    #print('line count :'+str(line_count))
+    if line_count >= 35:
+        if stopline_count == 0 :
+            stopline_count = stopline_count + 1
+            prev_time = time.time()
+            print('STOPLINE Detected ' + str(line_count) + 'LAP: ' + str(stopline_count))
+                
+        elif stopline_count == 1 and (time.time()-prev_time)> 8:
+            stopline_count = stopline_count + 1
+            prev_time = time.time()
+            print('STOPLINE Detected ' + str(line_count) + 'LAP: ' + str(stopline_count))
+            drive_mode=2
+
+
+
 # show image and return lpos, rpos
 def process_image(frame):
     global Width
     global Offset, Gap
     global cam, cam_debug, img
-    '''
-    # gray
-    gray = cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY)
-    roi = gray[Offset : Offset+Gap, 0 : Width]
 
     # blur
     kernel_size = 3
-    standard_deviation_x = 1.5     #Kernel standard deviation along X-axis
-    blur_gray = cv2.GaussianBlur(roi, (kernel_size, kernel_size), standard_deviation_x)
-
-    # canny edge
-    low_threshold = 90
-    high_threshold = 180
-    edge_img = cv2.Canny(np.uint8(blur_gray), low_threshold, high_threshold, kernel_size)
-    
-    '''
-    # blur
-    kernel_size = 5
     standard_deviation_x = 3     #Kernel standard deviation along X-axis
     blur = cv2.GaussianBlur(frame, (kernel_size, kernel_size), standard_deviation_x)
     
@@ -325,7 +310,7 @@ def process_image(frame):
     
     roi = region_of_interest(blur, vertices5)
     roi = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
-    cv2.imshow('roi', roi)
+    #cv2.imshow('roi', roi)
     
     # gray
     gray = cv2.cvtColor(roi,cv2.COLOR_BGR2GRAY)
@@ -341,15 +326,19 @@ def process_image(frame):
     cv2.imshow('Canny', edge_img)
     
     # HoughLinesP
-    all_lines = cv2.HoughLinesP(edge_img, 1, math.pi/180,30,30,5)
-
+    all_lines = cv2.HoughLinesP(edge_img, 1, math.pi/180,15,15,5)
+    
     if cam:
         cv2.imshow('calibration', frame)
-        
-        
     # divide left, right lines
+
+    # 선이 인식 안될 경우
     if all_lines is None:
         return (Width)/2, (Width)/2, False
+    
+    #정지선 검출
+    line_count = len(all_lines)
+    detect_stopline(line_count)
     left_lines, right_lines = divide_left_right(all_lines)
     
     if left_lines is not None: # 라인 정보를 받았으면
@@ -412,9 +401,7 @@ def draw_steer(steer_angle):
     arrow_roi = cv2.add(arrow, arrow_roi, mask=mask)
     res = cv2.add(arrow_roi, arrow)
     img[(Height - arrow_Height): Height, (Width/2 - arrow_Width/2): (Width/2 + arrow_Width/2)] = res
-    
-
-    
+     
     cv2.imshow('steer', img)
     
 
@@ -425,9 +412,13 @@ def start():
     global Width, Height
     global m
 
+    #pid 제어
+    previous_error = 0
+    integral = 0
     angle_pid_P = 1
     angle_pid_I = 0.0
     angle_pid_D = 0.7
+
     
     sum_angle = 0
     prev_angle = 0
@@ -435,9 +426,7 @@ def start():
 
     rospy.init_node('auto_drive')
     motor = rospy.Publisher('xycar_motor', xycar_motor, queue_size=1)
-    size = rospy.Subscriber('stopline_detect', rect_size, detect_stopline)
     image_sub = rospy.Subscriber("/usb_cam/image_raw/",Image,img_callback)
-    #haar = rospy.Subscriber('haar_detect', haar_detect, detect_obstacle)
     print ("---------- Xycar C1 HD v1.0 ----------")
     
     time.sleep(2)
@@ -459,16 +448,13 @@ def start():
             continue
 
         draw_img = image.copy()
-        img = draw_img
         
-        obstacle_img = image.copy()        
-        obstacle_img = cv2.rectangle(obstacle_img,(obstacle[0],obstacle[1]),(obstacle[0]+obstacle[2],obstacle[1]+obstacle[3]),(255,0,0),2)
+        #장애물 인식
+        #obstacle_img = image.copy()
+        #detect_obstacle(obstacle_img)
+        #obstacle_img = cv2.rectangle(obstacle_img,(obstacle[0],obstacle[1]),(obstacle[0]+obstacle[2],obstacle[1]+obstacle[3]),(255,0,0),2)
         #cv2.imshow('obstacle',obstacle_img)
-        #out1.write(draw_img)
-        
-        #cv2.imwrite('/home/pi/xycar_ws/src/auto_drive/src/images/xycar'+str(numbering).zfill(3)+'.jpg',draw_img)
-        #print(str(numbering).zfill(3))
-        #numbering = numbering + 1
+
         lpos, rpos, go = process_image(draw_img)
         
         if go:
@@ -491,7 +477,7 @@ def start():
         elif angle_c < -38 :
             angle_c = -50
         
-        draw_steer(angle_c)
+        #draw_steer(angle_c)
         
         steer_speed = (abs(angle_c)/10)*0.2
         #print(drive_mode)
@@ -499,7 +485,7 @@ def start():
         if drive_mode == 0:
             #drive(0, 0)
             #time.sleep(4)
-            drive(angle_c, 18.5-steer_speed)
+            drive(angle_c, 22-steer_speed)
 
             #장애물 만나면 피하는 알고리즘, 장애물을 만나 차선을 바꾼 뒤 얼마동안 주행 후 다시 원래 차선으로 복귀 
             if time.time() - time_drive > 0.7  and time.time() - time_drive < 2.5:
@@ -514,7 +500,6 @@ def start():
                     else :
                         drive(-35,17)
                         
-            
         elif drive_mode == 1:
             if yellow_line == 0:
                 if m > 2.5 :
@@ -534,7 +519,7 @@ def start():
                     drive(45,17)
         
         elif drive_mode == 2:
-            time.sleep(0.2)
+            time.sleep(2)
             drive(0,-30)
             drive(0,0)
             sys.exit(0)
@@ -544,9 +529,7 @@ def start():
         #f.write(data)
         #f.close()
         cv2.waitKey(1)
-        sq.sleep()
-    
-    
+
     #out1.release()
 
 if __name__ == '__main__':
