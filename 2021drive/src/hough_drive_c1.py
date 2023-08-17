@@ -19,6 +19,9 @@ import signal
 import sys
 import os
 
+# 추가된 부분: 로그와 그래프를 위한 라이브러리
+import time
+import matplotlib.pyplot as plt
 
 def signal_handler(sig, frame):
     import time
@@ -280,7 +283,7 @@ def detect_stopline(line_count):
     global stopline_count, drive_mode, prev_time
     # 정지선 인식
     #print('line count :'+str(line_count))
-    if line_count >= 35:
+    if line_count >= 55:
         if stopline_count == 0 :
             stopline_count = stopline_count + 1
             prev_time = time.time()
@@ -291,7 +294,6 @@ def detect_stopline(line_count):
             prev_time = time.time()
             print('STOPLINE Detected ' + str(line_count) + 'LAP: ' + str(stopline_count))
             drive_mode=2
-
 
 
 # show image and return lpos, rpos
@@ -316,17 +318,17 @@ def process_image(frame):
     gray = cv2.cvtColor(roi,cv2.COLOR_BGR2GRAY)
     
     ret, dest = cv2.threshold(gray, 130, 255, cv2.THRESH_BINARY )
-    cv2.imshow('gray', dest)
+    #cv2.imshow('gray', dest)
 
     # canny edge
     low_threshold = 170
     high_threshold = 200
     edge_img = cv2.Canny(np.uint8(dest), low_threshold, high_threshold, kernel_size)
     
-    cv2.imshow('Canny', edge_img)
+    #cv2.imshow('Canny', edge_img)
     
     # HoughLinesP
-    all_lines = cv2.HoughLinesP(edge_img, 1, math.pi/180,15,15,5)
+    all_lines = cv2.HoughLinesP(edge_img, 1, math.pi/180,15,30,3) #라인 검출
     
     if cam:
         cv2.imshow('calibration', frame)
@@ -353,15 +355,16 @@ def process_image(frame):
     frame, lpos = get_line_pos(frame, left_lines, left=True)
     frame, rpos = get_line_pos(frame, right_lines, right=True)
     #rospy.loginfo("rpos : " + str(rpos) + " lpos : " + str(lpos))
-    
-    if lpos >= 0 and rpos < 0:
-        rpos = lpos + 220
 
-    if rpos >= 0 and lpos < 0:
-        lpos =  rpos - 220
-        
     if lpos < 0 and rpos < 0:
         return lpos, rpos, False
+    
+    if lpos >= 0 and rpos < 0:
+        rpos = lpos + 200
+
+    if rpos >= 0 and lpos < 0:
+        lpos =  rpos - 200
+        
 
     if cam_debug and lpos >= 0 and rpos <= Width:
         # draw lines
@@ -374,7 +377,7 @@ def process_image(frame):
         frame = cv2.polylines(frame, [vertices5], True, (0,255,0),2)
         #frame = cv2.rectangle(frame, (0, Offset), (Width, Offset+Gap), (0, 255, 0), 2)
 
-    img = frame        
+    img = frame
 
     return lpos, rpos, True
 
@@ -411,19 +414,7 @@ def start():
     global size
     global Width, Height
     global m
-
-    #pid 제어
-    previous_error = 0
-    integral = 0
-    angle_pid_P = 1
-    angle_pid_I = 0.0
-    angle_pid_D = 0.7
-
     
-    sum_angle = 0
-    prev_angle = 0
-    steer_angle = 0
-
     rospy.init_node('auto_drive')
     motor = rospy.Publisher('xycar_motor', xycar_motor, queue_size=1)
     image_sub = rospy.Subscriber("/usb_cam/image_raw/",Image,img_callback)
@@ -434,13 +425,35 @@ def start():
     sq = rospy.Rate(30)
 
     t_check = time.time()
-    f_n = 0
-    time_drive = 0
-    back_flag = 0
+    obs_detected_time = 0
 
     uint8_image = np.uint8(image)
     yellow_line_detect(uint8_image)
     #numbering = 0
+
+    #PID 제어 관련 변수
+    dt = 0.1
+    prev_pos = Width / 2
+    curr_pos = Width / 2
+    setpoint = Width / 2 # 기준이 되는 위치, 도로의 중앙으로 와야 함
+    Kp = 0.65#- proportional gain
+    Ki = 0.01#- integral gain
+    Kd = 0.1#- derivative gain
+    A0 = Kp + Ki*dt + Kd/dt
+    A1 = -Kp - 2*Kd/dt
+    A2 = Kd/dt
+    error2 = 0 # e(t-2)
+    error1 = 0 # e(t-1)
+    error0 = 0 # e(t)
+    output = 0 #output angle
+
+    # 초기화
+    setpoint = Width / 2
+    error_integral = 0
+    prev_error = 0
+    time_prev = time.time()
+    output_values = []
+    position_values = []
 
     while not rospy.is_shutdown():
         
@@ -455,40 +468,71 @@ def start():
         #obstacle_img = cv2.rectangle(obstacle_img,(obstacle[0],obstacle[1]),(obstacle[0]+obstacle[2],obstacle[1]+obstacle[3]),(255,0,0),2)
         #cv2.imshow('obstacle',obstacle_img)
 
-        lpos, rpos, go = process_image(draw_img)
-        
-        if go:
-            center = (lpos + rpos) / 2
-            angle = -(Width/2 - center)
-            steer_angle = angle
-            prev_angle = steer_angle
-        
-        else :
-            steer_angle = prev_angle
 
-        #PID 제어 부분
-        sum_angle += steer_angle
-        diff_angle = steer_angle - prev_angle
-        angle_c = angle_pid_P * steer_angle + angle_pid_I * sum_angle + angle_pid_D * (diff_angle)
+        lpos, rpos, line_exists = process_image(draw_img)
+        if line_exists:
+            curr_pos = ((lpos + rpos) / 2)
+            prev_pos = curr_pos
+        else:
+            curr_pos = prev_pos
+
+        error2 = error1
+        error1 = error0
+        error0 = curr_pos - setpoint 
+        output = output + (A0*error0) + (A1*error1) + (A2*error2)
+        print('output' + str(output))
+        angle_c = output # 조향각 보정 
+
+        '''
+        # 시간 경과 계산
+        time_curr = time.time()
+        dt = time_curr - time_prev
+        time_prev = time_curr
         
+        # 오차 계산
+        error = setpoint - curr_pos
         
-        if angle_c > 38 :
+        # 누적 오차 계산
+        error_integral += error * dt
+        
+        # 미분 오차 계산
+        error_derivative = (error - prev_error) / dt
+        
+        # PID 제어 값 계산
+        output = Kp * error + Ki * error_integral + Kd * error_derivative
+
+        # 추가된 부분: 현재 위치와 제어 값 로깅
+        position_values.append(curr_pos)
+        output_values.append(output)
+
+        # 그래프 그리기
+        plt.clf()
+        plt.plot(position_values, label='Position')
+        plt.plot(output_values, label='Output')
+        plt.xlabel('Time')
+        plt.ylabel('Value')
+        plt.legend()
+        plt.pause(0.001)
+
+        '''
+
+        #애매하게 핸들꺽지말고 꺾을꺼면 확실하게 꺽기 위함
+        if angle_c > 49 :
             angle_c = 50
-        elif angle_c < -38 :
+        elif angle_c < -49 :
             angle_c = -50
         
-        #draw_steer(angle_c)
-        
-        steer_speed = (abs(angle_c)/10)*0.2
+
+        draw_steer(angle_c)
         #print(drive_mode)
 
         if drive_mode == 0:
             #drive(0, 0)
             #time.sleep(4)
-            drive(angle_c, 22-steer_speed)
+            drive(angle_c, 22)
 
             #장애물 만나면 피하는 알고리즘, 장애물을 만나 차선을 바꾼 뒤 얼마동안 주행 후 다시 원래 차선으로 복귀 
-            if time.time() - time_drive > 0.7  and time.time() - time_drive < 2.5:
+            if time.time() - obs_detected_time > 0.7  and time.time() - obs_detected_time < 2.5:
                 if yellow_line == 0:
                     if m > 2.2 :
                         continue
@@ -505,7 +549,7 @@ def start():
                 if m > 2.5 :
                     drive(40,17)
                     time.sleep(0.2)
-                    time_drive = time.time()
+                    obs_detected_time = time.time()
                     drive_mode = 0
                 else :
                     drive(-35,17)
@@ -513,13 +557,14 @@ def start():
                 if m > 2.5 :
                     drive(-45,17)
                     time.sleep(0.4)
-                    time_drive = time.time()
+                    obs_detected_time = time.time()
                     drive_mode = 0
                 else :
                     drive(45,17)
         
         elif drive_mode == 2:
-            time.sleep(2)
+            drive(0,10)
+            time.sleep(0.2)
             drive(0,-30)
             drive(0,0)
             sys.exit(0)
