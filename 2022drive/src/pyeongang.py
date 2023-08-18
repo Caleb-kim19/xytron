@@ -43,6 +43,7 @@ Gap = 85
 m = 0
 prev_time = 0
 count_over_linecount_40 = 0
+count_over_linecount_450 = 0
 #size = 0
 
 '''
@@ -75,10 +76,6 @@ def img_callback(data):
     global time_c
     image = bridge.imgmsg_to_cv2(data, "bgr8")
 
-def ultra_callback(data):
-    global ultra_msg
-    ultra_msg = data.data
-
 def draw_steer(steer_angle):
     global Width, Height, img, obstacle
     #img = cv_image
@@ -103,7 +100,7 @@ def draw_steer(steer_angle):
     res = cv2.add(arrow_roi, arrow)
     img[(Height - arrow_Height): Height, (Width/2 - arrow_Width/2): (Width/2 + arrow_Width/2)] = res
      
-    cv2.imshow('steer', img)
+    #cv2.imshow('steer', img)
         
 
 # publish xycar_motor msg
@@ -337,7 +334,7 @@ def process_image(frame):
     
     roi = region_of_interest(blur, vertices5)
     roi = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
-    cv2.imshow('roi', roi)
+    #cv2.imshow('roi', roi)
     
     # gray
     gray = cv2.cvtColor(roi,cv2.COLOR_BGR2GRAY)
@@ -355,8 +352,8 @@ def process_image(frame):
     # HoughLinesP
     all_lines = cv2.HoughLinesP(edge_img, 1, math.pi/180,15,15,5) #라인 검출
     
-    if cam:
-        cv2.imshow('calibration', frame)
+    #if cam:
+    #    cv2.imshow('calibration', frame)
     # divide left, right lines
 
     # 선이 인식 안될 경우
@@ -407,21 +404,31 @@ def process_image(frame):
     return lpos, rpos, True
 
 def is_front_car(image_gray):
-    global Width, drive_mode
-    image_gray = image_gray[120 : 150, int(Width / 2) - 30 : int(Width / 2) + 30]
-    cv2.imshow('image_gray', image_gray)
-    blur = cv2.GaussianBlur(image_gray, ksize=(5, 5), sigmaX=0)
-    edged = cv2.Canny(blur, 10, 250)
-    
+    global Width, drive_mode, rap1, count_over_linecount_450
+    image_gray = image_gray[120 : 150, int(Width / 2) - 45 : int(Width / 2) + 45]
+    #cv2.imshow('image_gray', image_gray)
+    blur = cv2.GaussianBlur(image_gray, ksize=(5, 5), sigmaX=1)
+    edged = cv2.Canny(blur, 10, 100) 
+    cv2.imshow('edged3', edged)
+
     white_count = 0
     for y_pixel in range(0, edged.shape[1]):
             for x_pixel in range(0, edged.shape[0]):
                 if (edged[x_pixel, y_pixel] == 255):
                     white_count = white_count + 1
+    # HoughLinesP
+    #all_lines = cv2.HoughLinesP(edged, 1, math.pi/180,15,15,2) #라인 검출
+    #if all_lines is None:
+    #    return
+    #white_count = len(all_lines)
+    #print('white_count = '+ str(white_count))
     print('white_count = '+ str(white_count))
-    if white_count > 300:
-        print('obstacle_detected')
-        drive_mode = 1
+    if white_count > 510:
+        count_over_linecount_450 = count_over_linecount_450+1
+        if count_over_linecount_450 >= 3 :
+            print('obstacle_detected')
+            drive_mode = 1
+            rap1 = True
 
 def start():
     global motor, drive_mode, obstacle, back_time, yellow_line
@@ -429,7 +436,8 @@ def start():
     global size
     global Width, Height
     global m
-    
+    global rap1
+    speed = 20
     
     rospy.init_node('auto_drive')
     motor = rospy.Publisher('xycar_motor', xycar_motor, queue_size=1)
@@ -464,20 +472,19 @@ def start():
     error0 = 0 # e(t)
     output = 0 #output angle
 
+    rap1 = False
+
     while not rospy.is_shutdown():
         
         while not image.size == (Width*Height*3):
             continue
 
-        #장애물 인식1
-        #obstacle_img = image.copy()
-        #obstacle_img = cv2.rectangle(obstacle_img,(obstacle[0],obstacle[1]),(obstacle[0]+obstacle[2],obstacle[1]+obstacle[3]),(255,0,0),2)
-        #cv2.imshow('obstacle',obstacle_img)
-        #detect_obstacle(obstacle_img)
-
-        #장애물 인식2
-        obstacle_img = image.copy()
-        is_front_car(obstacle_img)
+        #장애물 인식
+        
+        print('rap1 = '+ str(rap1))
+        if rap1 == False:
+            obstacle_img = image.copy()
+            is_front_car(obstacle_img)
         
         draw_img = image.copy()
         lpos, rpos, line_exists = process_image(draw_img)
@@ -504,13 +511,13 @@ def start():
 
         if starting <= 5:
             print("start!!!!!!!!!!")
-            drive(0, 20)
+            drive(0, speed)
             starting = starting + 1
 
         print('drive_mode = ' + str(drive_mode))
 
         if drive_mode == 0:
-            drive(angle_c, 18)
+            drive(angle_c, speed)
 
             #장애물 만나면 피하는 알고리즘, 장애물을 만나 차선을 바꾼 뒤 얼마동안 주행 후 다시 원래 차선으로 복귀 
             if time.time() - obs_detected_time > 0.7  and time.time() - obs_detected_time < 2.5:
@@ -518,30 +525,29 @@ def start():
                     if m > 2.2 :
                         continue
                     else :
-                        drive(35,17)
+                        drive(50,speed)
                 else :
                     if m > 2.2 :
                         continue
                     else :
-                        drive(-35,17)
-                        
+                        drive(-50,speed)
         elif drive_mode == 1:
             if yellow_line == 0:
                 if m > 2.5 :
-                    drive(50,17)
+                    drive(50,speed)
                     time.sleep(0.2)
                     obs_detected_time = time.time()
                     drive_mode = 0
                 else :
-                    drive(-50,17)
+                    drive(-50,speed)
             else:
                 if m > 2.5 :
-                    drive(-50,17)
+                    drive(-50,speed)
                     time.sleep(0.4)
                     obs_detected_time = time.time()
                     drive_mode = 0
                 else :
-                    drive(50,17)
+                    drive(50,speed)
         
         elif drive_mode == 2:
             time.sleep(0.2)
