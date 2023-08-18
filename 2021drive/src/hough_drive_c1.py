@@ -42,6 +42,7 @@ Offset = 175
 Gap = 85
 m = 0
 prev_time = 0
+count_over_linecount_40 = 0
 #size = 0
 
 '''
@@ -67,26 +68,39 @@ yellow_line = 0
 
 #out1 = cv2.VideoWriter('../result.avi', fourcc, 15.0, (Width, Height))
 
-cascade = cv2.CascadeClassifier('/home/pi/xycar_ws/src/oval_team1/2021drive/src/obs_cascade.xml')
 
 def img_callback(data):
     global image   
     global sub_f 
     global time_c
     image = bridge.imgmsg_to_cv2(data, "bgr8")
-        
-def detect_obstacle(image):
-    global obstacle, drive_mode, back_time
-    
-    gray = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
-    cascades = cascade.detectMultiScale(gray,1.01,50)
 
-    if len(cascades) > 0:
-        obstacle = cascades[0]
-        print('obstacle detected')
-        drive_mode = 1
-    else:
-        obstacle = (0,0,0,0)
+def draw_steer(steer_angle):
+    global Width, Height, img, obstacle
+    #img = cv_image
+
+    arrow = cv2.imread('/home/pi/xycar_ws/src/auto_drive/src/steer_arrow.png')
+
+    origin_Height = arrow.shape[0]
+    origin_Width = arrow.shape[1]
+    steer_wheel_center = origin_Height * 0.74
+    arrow_Height = Height/2
+    arrow_Width = (arrow_Height * 462)/728
+
+    matrix = cv2.getRotationMatrix2D((origin_Width/2, steer_wheel_center), (-steer_angle) * 1.5, 0.7)    
+    arrow = cv2.warpAffine(arrow, matrix, (origin_Width+60, origin_Height))
+    arrow = cv2.resize(arrow, dsize=(arrow_Width, arrow_Height), interpolation=cv2.INTER_AREA)
+
+    gray_arrow = cv2.cvtColor(arrow, cv2.COLOR_BGR2GRAY)
+    _, mask = cv2.threshold(gray_arrow, 1, 255, cv2.THRESH_BINARY_INV)
+
+    arrow_roi = img[arrow_Height: Height, (Width/2 - arrow_Width/2) : (Width/2 + arrow_Width/2)]
+    arrow_roi = cv2.add(arrow, arrow_roi, mask=mask)
+    res = cv2.add(arrow_roi, arrow)
+    img[(Height - arrow_Height): Height, (Width/2 - arrow_Width/2): (Width/2 + arrow_Width/2)] = res
+     
+    cv2.imshow('steer', img)
+        
 
 # publish xycar_motor msg
 def drive(Angle, Speed): 
@@ -281,19 +295,26 @@ def region_of_interest(img, vertices, color3=(255, 255, 255), color1=255):
 
 def detect_stopline(line_count):
     global stopline_count, drive_mode, prev_time
+    global count_over_linecount_40
     # 정지선 인식
+
     #print('line count :'+str(line_count))
-    if line_count >= 55:
+    if line_count >= 37:
         if stopline_count == 0 :
             stopline_count = stopline_count + 1
             prev_time = time.time()
             print('STOPLINE Detected ' + str(line_count) + 'LAP: ' + str(stopline_count))
                 
         elif stopline_count == 1 and (time.time()-prev_time)> 8:
+            
             stopline_count = stopline_count + 1
             prev_time = time.time()
             print('STOPLINE Detected ' + str(line_count) + 'LAP: ' + str(stopline_count))
-            drive_mode=2
+
+        elif stopline_count == 2:
+            count_over_linecount_40 = count_over_linecount_40 + 1
+            if count_over_linecount_40 > 5 :
+                drive_mode = 2
 
 
 # show image and return lpos, rpos
@@ -312,7 +333,7 @@ def process_image(frame):
     
     roi = region_of_interest(blur, vertices5)
     roi = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
-    #cv2.imshow('roi', roi)
+    cv2.imshow('roi', roi)
     
     # gray
     gray = cv2.cvtColor(roi,cv2.COLOR_BGR2GRAY)
@@ -328,7 +349,7 @@ def process_image(frame):
     #cv2.imshow('Canny', edge_img)
     
     # HoughLinesP
-    all_lines = cv2.HoughLinesP(edge_img, 1, math.pi/180,15,30,3) #라인 검출
+    all_lines = cv2.HoughLinesP(edge_img, 1, math.pi/180,15,15,5) #라인 검출
     
     if cam:
         cv2.imshow('calibration', frame)
@@ -360,10 +381,10 @@ def process_image(frame):
         return lpos, rpos, False
     
     if lpos >= 0 and rpos < 0:
-        rpos = lpos + 200
+        rpos = lpos + 190
 
     if rpos >= 0 and lpos < 0:
-        lpos =  rpos - 200
+        lpos =  rpos - 190
         
 
     if cam_debug and lpos >= 0 and rpos <= Width:
@@ -381,32 +402,32 @@ def process_image(frame):
 
     return lpos, rpos, True
 
-def draw_steer(steer_angle):
-    global Width, Height, img, obstacle
-    #img = cv_image
+def is_front_car(image_gray):
+    global Width, drive_mode, rap1
+    image_gray = image_gray[120 : 150, int(Width / 2) - 45 : int(Width / 2) + 45]
+    cv2.imshow('image_gray', image_gray)
+    blur = cv2.GaussianBlur(image_gray, ksize=(5, 5), sigmaX=1)
+    edged = cv2.Canny(blur, 50, 200)
+    cv2.imshow('edged3', edged)
 
-    arrow = cv2.imread('/home/pi/xycar_ws/src/auto_drive/src/steer_arrow.png')
 
-    origin_Height = arrow.shape[0]
-    origin_Width = arrow.shape[1]
-    steer_wheel_center = origin_Height * 0.74
-    arrow_Height = Height/2
-    arrow_Width = (arrow_Height * 462)/728
-
-    matrix = cv2.getRotationMatrix2D((origin_Width/2, steer_wheel_center), (-steer_angle) * 1.5, 0.7)    
-    arrow = cv2.warpAffine(arrow, matrix, (origin_Width+60, origin_Height))
-    arrow = cv2.resize(arrow, dsize=(arrow_Width, arrow_Height), interpolation=cv2.INTER_AREA)
-
-    gray_arrow = cv2.cvtColor(arrow, cv2.COLOR_BGR2GRAY)
-    _, mask = cv2.threshold(gray_arrow, 1, 255, cv2.THRESH_BINARY_INV)
-
-    arrow_roi = img[arrow_Height: Height, (Width/2 - arrow_Width/2) : (Width/2 + arrow_Width/2)]
-    arrow_roi = cv2.add(arrow, arrow_roi, mask=mask)
-    res = cv2.add(arrow_roi, arrow)
-    img[(Height - arrow_Height): Height, (Width/2 - arrow_Width/2): (Width/2 + arrow_Width/2)] = res
-     
-    cv2.imshow('steer', img)
+    white_count = 0
+    for y_pixel in range(0, edged.shape[1]):
+            for x_pixel in range(0, edged.shape[0]):
+                if (edged[x_pixel, y_pixel] == 255):
+                    white_count = white_count + 1
     
+    # HoughLinesP
+    #all_lines = cv2.HoughLinesP(edged, 1, math.pi/180,15,15,2) #라인 검출
+    #if all_lines is None:
+    #    return
+    #white_count = len(all_lines)
+    #print('white_count = '+ str(white_count))
+    print('white_count = '+ str(white_count))
+    if white_count > 490:
+        print('obstacle_detected')
+        drive_mode = 1
+        #rap1 = True
 
 def start():
     global motor, drive_mode, obstacle, back_time, yellow_line
@@ -414,6 +435,7 @@ def start():
     global size
     global Width, Height
     global m
+    global rap1
     
     rospy.init_node('auto_drive')
     motor = rospy.Publisher('xycar_motor', xycar_motor, queue_size=1)
@@ -429,6 +451,7 @@ def start():
 
     uint8_image = np.uint8(image)
     yellow_line_detect(uint8_image)
+    starting = 0
     #numbering = 0
 
     #PID 제어 관련 변수
@@ -436,9 +459,9 @@ def start():
     prev_pos = Width / 2
     curr_pos = Width / 2
     setpoint = Width / 2 # 기준이 되는 위치, 도로의 중앙으로 와야 함
-    Kp = 0.65#- proportional gain
-    Ki = 0.01#- integral gain
-    Kd = 0.1#- derivative gain
+    Kp = 0.55#- proportional gain 0.55
+    Ki = 0.0001#- integral gain
+    Kd = 0.115#- derivative gain
     A0 = Kp + Ki*dt + Kd/dt
     A1 = -Kp - 2*Kd/dt
     A2 = Kd/dt
@@ -447,28 +470,21 @@ def start():
     error0 = 0 # e(t)
     output = 0 #output angle
 
-    # 초기화
-    setpoint = Width / 2
-    error_integral = 0
-    prev_error = 0
-    time_prev = time.time()
-    output_values = []
-    position_values = []
+    rap1 = False
 
     while not rospy.is_shutdown():
         
         while not image.size == (Width*Height*3):
             continue
 
-        draw_img = image.copy()
-        
         #장애물 인식
-        #obstacle_img = image.copy()
-        #detect_obstacle(obstacle_img)
-        #obstacle_img = cv2.rectangle(obstacle_img,(obstacle[0],obstacle[1]),(obstacle[0]+obstacle[2],obstacle[1]+obstacle[3]),(255,0,0),2)
-        #cv2.imshow('obstacle',obstacle_img)
-
-
+        
+        print('rap1 = '+ str(rap1))
+        if rap1 == False:
+            obstacle_img = image.copy()
+            is_front_car(obstacle_img)
+        
+        draw_img = image.copy()
         lpos, rpos, line_exists = process_image(draw_img)
         if line_exists:
             curr_pos = ((lpos + rpos) / 2)
@@ -480,56 +496,26 @@ def start():
         error1 = error0
         error0 = curr_pos - setpoint 
         output = output + (A0*error0) + (A1*error1) + (A2*error2)
-        print('output' + str(output))
-        angle_c = output # 조향각 보정 
+        #print('output = ' + str(output))
+        angle_c = output # 조향각 보정
 
-        '''
-        # 시간 경과 계산
-        time_curr = time.time()
-        dt = time_curr - time_prev
-        time_prev = time_curr
-        
-        # 오차 계산
-        error = setpoint - curr_pos
-        
-        # 누적 오차 계산
-        error_integral += error * dt
-        
-        # 미분 오차 계산
-        error_derivative = (error - prev_error) / dt
-        
-        # PID 제어 값 계산
-        output = Kp * error + Ki * error_integral + Kd * error_derivative
-
-        # 추가된 부분: 현재 위치와 제어 값 로깅
-        position_values.append(curr_pos)
-        output_values.append(output)
-
-        # 그래프 그리기
-        plt.clf()
-        plt.plot(position_values, label='Position')
-        plt.plot(output_values, label='Output')
-        plt.xlabel('Time')
-        plt.ylabel('Value')
-        plt.legend()
-        plt.pause(0.001)
-
-        '''
-
-        #애매하게 핸들꺽지말고 꺾을꺼면 확실하게 꺽기 위함
+        #angle_c 절대값이 50보다 커질 경우를 방지
         if angle_c > 49 :
             angle_c = 50
         elif angle_c < -49 :
             angle_c = -50
         
+        #draw_steer(angle_c)
 
-        draw_steer(angle_c)
-        #print(drive_mode)
+        if starting <= 5:
+            print("start!!!!!!!!!!")
+            drive(0, 20)
+            starting = starting + 1
+
+        print('drive_mode = ' + str(drive_mode))
 
         if drive_mode == 0:
-            #drive(0, 0)
-            #time.sleep(4)
-            drive(angle_c, 22)
+            drive(angle_c, 20)
 
             #장애물 만나면 피하는 알고리즘, 장애물을 만나 차선을 바꾼 뒤 얼마동안 주행 후 다시 원래 차선으로 복귀 
             if time.time() - obs_detected_time > 0.7  and time.time() - obs_detected_time < 2.5:
@@ -537,42 +523,39 @@ def start():
                     if m > 2.2 :
                         continue
                     else :
-                        drive(35,17)
+                        drive(50,20)
                 else :
                     if m > 2.2 :
                         continue
                     else :
-                        drive(-35,17)
-                        
+                        drive(-50,20)
         elif drive_mode == 1:
             if yellow_line == 0:
                 if m > 2.5 :
-                    drive(40,17)
+                    drive(50,20)
                     time.sleep(0.2)
                     obs_detected_time = time.time()
                     drive_mode = 0
                 else :
-                    drive(-35,17)
+                    drive(-50,20)
             else:
                 if m > 2.5 :
-                    drive(-45,17)
+                    drive(-50,20)
                     time.sleep(0.4)
                     obs_detected_time = time.time()
                     drive_mode = 0
                 else :
-                    drive(45,17)
+                    drive(50,20)
         
         elif drive_mode == 2:
-            drive(0,10)
             time.sleep(0.2)
-            drive(0,-30)
-            drive(0,0)
+            drive(0,-10)
             sys.exit(0)
-
 
         #f = open("../Log.txt",'a')
         #f.write(data)
         #f.close()
+        sq.sleep()
         cv2.waitKey(1)
 
     #out1.release()
